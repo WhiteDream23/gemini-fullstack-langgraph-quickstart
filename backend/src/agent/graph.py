@@ -7,7 +7,7 @@ from langgraph.types import Send
 from langgraph.graph import StateGraph
 from langgraph.graph import START, END
 from langchain_core.runnables import RunnableConfig
-from google.genai import Client
+from tavily import TavilyClient
 
 from agent.state import (
     OverallState,
@@ -23,21 +23,21 @@ from agent.prompts import (
     reflection_instructions,
     answer_instructions,
 )
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from agent.utils import (
-    get_citations,
     get_research_topic,
-    insert_citation_markers,
-    resolve_urls,
 )
 
 load_dotenv()
 
-if os.getenv("GEMINI_API_KEY") is None:
-    raise ValueError("GEMINI_API_KEY is not set")
+if os.getenv("OPENAI_API_KEY") is None:
+    raise ValueError("OPENAI_API_KEY is not set")
 
-# Used for Google Search API
-genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
+if os.getenv("TAVILY_API_KEY") is None:
+    raise ValueError("TAVILY_API_KEY is not set")
+
+# Initialize Tavily client
+tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 
 # Nodes
@@ -60,12 +60,13 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     if state.get("initial_search_query_count") is None:
         state["initial_search_query_count"] = configurable.number_of_initial_queries
 
-    # init Gemini 2.0 Flash
-    llm = ChatGoogleGenerativeAI(
+    # init Qwen model via ModelScope
+    llm = ChatOpenAI(
         model=configurable.query_generator_model,
         temperature=1.0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
     )
     structured_llm = llm.with_structured_output(SearchQueryList)
 
@@ -93,9 +94,10 @@ def continue_to_web_research(state: QueryGenerationState):
 
 
 def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
-    """LangGraph node that performs web research using the native Google Search API tool.
+    """LangGraph node that performs web research using Tavily Search API.
 
-    Executes a web search using the native Google Search API tool in combination with Gemini 2.0 Flash.
+    Executes a web search using Tavily API and then uses Qwen model to analyze
+    and summarize the search results.
 
     Args:
         state: Current graph state containing the search query and research loop count
@@ -106,32 +108,99 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
     """
     # Configure
     configurable = Configuration.from_runnable_config(config)
-    formatted_prompt = web_searcher_instructions.format(
-        current_date=get_current_date(),
-        research_topic=state["search_query"],
-    )
-
-    # Uses the google genai client as the langchain client doesn't return grounding metadata
-    response = genai_client.models.generate_content(
-        model=configurable.query_generator_model,
-        contents=formatted_prompt,
-        config={
-            "tools": [{"google_search": {}}],
-            "temperature": 0,
-        },
-    )
-    # resolve the urls to short urls for saving tokens and time
-    resolved_urls = resolve_urls(
-        response.candidates[0].grounding_metadata.grounding_chunks, state["id"]
-    )
-    # Gets the citations and adds them to the generated text
-    citations = get_citations(response, resolved_urls)
-    modified_text = insert_citation_markers(response.text, citations)
-    sources_gathered = [item for citation in citations for item in citation["segments"]]
+    search_query = state["search_query"]
+    
+    try:
+        # Perform web search using Tavily
+        search_results = tavily_client.search(
+            query=search_query,
+            search_depth="advanced",
+            max_results=5,
+            include_domains=None,
+            exclude_domains=None,
+            include_answer=True,
+            include_raw_content=False,
+            include_images=False
+        )
+        
+        # Extract relevant information from search results
+        search_content = []
+        sources_gathered = []
+        
+        if search_results.get("results"):
+            for idx, result in enumerate(search_results["results"]):
+                source_info = {
+                    "short_url": f"[source_{state['id']}_{idx}]",
+                    "value": result.get("url", ""),
+                    "title": result.get("title", ""),
+                    "content": result.get("content", "")
+                }
+                sources_gathered.append(source_info)
+                
+                # Format content for analysis
+                search_content.append(f"来源: {result.get('title', 'Unknown')}\n"
+                                    f"URL: {result.get('url', '')}\n"
+                                    f"内容: {result.get('content', '')}")
+        
+        # Use Qwen model to analyze and synthesize the search results
+        llm = ChatOpenAI(
+            model=configurable.query_generator_model,
+            temperature=0,
+            max_retries=2,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+        )
+        
+        # Enhanced prompt for analysis
+        analysis_prompt = f"""
+        {web_searcher_instructions.format(
+            current_date=get_current_date(),
+            research_topic=search_query,
+        )}
+        
+        以下是搜索到的相关信息：
+        
+        {chr(10).join(search_content)}
+        
+        请基于以上搜索结果，提供关于"{search_query}"的全面分析和总结。
+        请在回答中引用相关的源链接，格式为 [source_{state['id']}_X]。
+        """
+        
+        response = llm.invoke(analysis_prompt)
+        modified_text = response.content
+        
+        # Add Tavily's direct answer if available
+        if search_results.get("answer"):
+            modified_text = f"快速回答: {search_results['answer']}\n\n详细分析:\n{modified_text}"
+        
+    except Exception as e:
+        # Fallback to knowledge-based response if Tavily fails
+        print(f"Tavily搜索失败: {e}")
+        
+        llm = ChatOpenAI(
+            model=configurable.query_generator_model,
+            temperature=0,
+            max_retries=2,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+        )
+        
+        fallback_prompt = f"""
+        {web_searcher_instructions.format(
+            current_date=get_current_date(),
+            research_topic=search_query,
+        )}
+        
+        注意：由于网络搜索服务暂时不可用，请基于您的知识库提供关于"{search_query}"的详细信息。
+        """
+        
+        response = llm.invoke(fallback_prompt)
+        modified_text = f"[基于知识库回答] {response.content}"
+        sources_gathered = []
 
     return {
         "sources_gathered": sources_gathered,
-        "search_query": [state["search_query"]],
+        "search_query": [search_query],
         "web_research_result": [modified_text],
     }
 
@@ -162,12 +231,13 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
         research_topic=get_research_topic(state["messages"]),
         summaries="\n\n---\n\n".join(state["web_research_result"]),
     )
-    # init Reasoning Model
-    llm = ChatGoogleGenerativeAI(
+    # init Qwen Model
+    llm = ChatOpenAI(
         model=reasoning_model,
         temperature=1.0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
     )
     result = llm.with_structured_output(Reflection).invoke(formatted_prompt)
 
@@ -241,12 +311,13 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
         summaries="\n---\n\n".join(state["web_research_result"]),
     )
 
-    # init Reasoning Model, default to Gemini 2.5 Flash
-    llm = ChatGoogleGenerativeAI(
+    # init Qwen Model, default to Qwen3-30B
+    llm = ChatOpenAI(
         model=reasoning_model,
         temperature=0,
         max_retries=2,
-        api_key=os.getenv("GEMINI_API_KEY"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
     )
     result = llm.invoke(formatted_prompt)
 
