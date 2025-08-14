@@ -67,6 +67,7 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
         max_retries=2,
         api_key=os.getenv("OPENAI_API_KEY"),
         base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+        extra_body={"enable_thinking": False},
     )
     structured_llm = llm.with_structured_output(SearchQueryList)
 
@@ -149,6 +150,7 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
             max_retries=2,
             api_key=os.getenv("OPENAI_API_KEY"),
             base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+            extra_body={"enable_thinking": False},
         )
         
         # Enhanced prompt for analysis
@@ -183,6 +185,7 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
             max_retries=2,
             api_key=os.getenv("OPENAI_API_KEY"),
             base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+            extra_body={"enable_thinking": False},
         )
         
         fallback_prompt = f"""
@@ -238,6 +241,7 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
         max_retries=2,
         api_key=os.getenv("OPENAI_API_KEY"),
         base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+        extra_body={"enable_thinking": False},
     )
     result = llm.with_structured_output(Reflection).invoke(formatted_prompt)
 

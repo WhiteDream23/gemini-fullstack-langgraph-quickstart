@@ -19,6 +19,7 @@ dependencies = [
     "fastapi",
     "openai",
     "tavily-python",
+    "gradio>=4.0.0",
 ]
 
 
