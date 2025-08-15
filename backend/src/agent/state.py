@@ -19,6 +19,11 @@ class OverallState(TypedDict):
     max_research_loops: int
     research_loop_count: int
     reasoning_model: str
+    # RAG 相关状态
+    rag_result: str
+    rag_sufficient: bool
+    rag_confidence: float
+    use_local_knowledge: bool
 
 
 class ReflectionState(TypedDict):
@@ -27,6 +32,14 @@ class ReflectionState(TypedDict):
     follow_up_queries: Annotated[list, operator.add]
     research_loop_count: int
     number_of_ran_queries: int
+
+
+class RAGState(TypedDict):
+    """RAG 检索状态"""
+    rag_result: str
+    rag_sufficient: bool
+    rag_confidence: float
+    evaluation_reason: str
 
 
 class Query(TypedDict):

@@ -2,18 +2,21 @@ import os
 
 from agent.tools_and_schemas import SearchQueryList, Reflection
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Send
 from langgraph.graph import StateGraph
 from langgraph.graph import START, END
 from langchain_core.runnables import RunnableConfig
 from tavily import TavilyClient
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 
 from agent.state import (
     OverallState,
     QueryGenerationState,
     ReflectionState,
     WebSearchState,
+    RAGState,
 )
 from agent.configuration import Configuration
 from agent.prompts import (
@@ -27,6 +30,7 @@ from langchain_openai import ChatOpenAI
 from agent.utils import (
     get_research_topic,
 )
+from agent.rag_tools import create_rag_tool, evaluate_rag_sufficiency
 
 load_dotenv()
 
@@ -39,13 +43,134 @@ if os.getenv("TAVILY_API_KEY") is None:
 # Initialize Tavily client
 tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
+# Initialize memory for the RAG agent
+memory = MemorySaver()
+
 
 # Nodes
+def local_rag_search(state: OverallState, config: RunnableConfig) -> RAGState:
+    """本地 RAG 检索节点
+    
+    首先在本地知识库中搜索相关信息，如果找到足够的信息，
+    则可以直接基于本地知识回答，否则继续网络搜索流程。
+    """
+    configurable = Configuration.from_runnable_config(config)
+    
+    # 获取用户问题
+    user_question = get_research_topic(state["messages"])
+    
+    # 创建 LLM 实例
+    llm = ChatOpenAI(
+        model=configurable.query_generator_model,
+        temperature=0,
+        max_retries=2,
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+    )
+    
+    # 创建 RAG 工具
+    retrieve_tool = create_rag_tool()
+    
+    # 创建 React Agent
+    agent_executor = create_react_agent(llm, [retrieve_tool], checkpointer=memory)
+    
+    try:
+        # 执行 RAG 检索
+        rag_prompt = f"""请使用本地知识库检索工具回答以下问题：{user_question}
+        
+如果本地知识库中有相关信息，请基于检索到的内容提供详细回答。
+如果本地知识库中没有足够的相关信息，请明确说明需要进一步的网络搜索。"""
+        
+        result = agent_executor.invoke(
+            {"messages": [HumanMessage(content=rag_prompt)]},
+            config={"configurable": {"thread_id": "rag_search"}}
+        )
+        
+        # 提取结果
+        rag_result = ""
+        if result.get("messages"):
+            rag_result = result["messages"][-1].content
+        
+        # 评估 RAG 结果的充分性
+        evaluation = evaluate_rag_sufficiency(rag_result, user_question)
+        
+        return {
+            "rag_result": rag_result,
+            "rag_sufficient": evaluation["is_sufficient"],
+            "rag_confidence": evaluation["confidence"],
+            "evaluation_reason": evaluation["reason"],
+            "use_local_knowledge": evaluation["is_sufficient"]
+        }
+        
+    except Exception as e:
+        return {
+            "rag_result": f"本地 RAG 检索失败: {str(e)}",
+            "rag_sufficient": False,
+            "rag_confidence": 0.0,
+            "evaluation_reason": "RAG 检索过程中出现错误",
+            "use_local_knowledge": False
+        }
+
+
+def evaluate_rag_result(state: OverallState) -> str:
+    """评估 RAG 结果，决定下一步流程"""
+    if state.get("rag_sufficient", False) and state.get("rag_confidence", 0) > 0.5:
+        return "finalize_answer_with_rag"
+    else:
+        return "generate_query"
+
+
+def finalize_answer_with_rag(state: OverallState, config: RunnableConfig):
+    """基于 RAG 结果生成最终答案"""
+    configurable = Configuration.from_runnable_config(config)
+    reasoning_model = state.get("reasoning_model") or configurable.answer_model
+    
+    # 获取用户问题和 RAG 结果
+    user_question = get_research_topic(state["messages"])
+    rag_content = state.get("rag_result", "")
+    
+    # 创建基于 RAG 的回答提示
+    rag_answer_prompt = f"""
+基于以下本地知识库的检索结果，请为用户问题提供详细、准确的回答。
+
+用户问题: {user_question}
+
+本地知识库检索结果:
+{rag_content}
+
+请注意:
+1. 基于提供的本地知识库内容进行回答
+2. 如果信息不完整，请说明已知信息的局限性
+3. 保持回答的准确性和相关性
+4. 适当引用来源信息
+
+当前日期: {get_current_date()}
+"""
+    
+    # 初始化 LLM
+    llm = ChatOpenAI(
+        model=reasoning_model,
+        temperature=0,
+        max_retries=2,
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+    )
+    
+    result = llm.invoke(rag_answer_prompt)
+    
+    # 添加 RAG 来源标注
+    final_answer = f"{result.content}\n\n---\n💡 此回答基于本地知识库内容生成"
+    
+    return {
+        "messages": [AIMessage(content=final_answer)],
+        "sources_gathered": [],  # RAG 不提供网络来源
+    }
+
+
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
     """LangGraph node that generates search queries based on the User's question.
 
-    Uses Gemini 2.0 Flash to create an optimized search queries for web research based on
-    the User's question.
+    当本地 RAG 检索不足时，使用 Qwen 模型创建网络搜索查询。
 
     Args:
         state: Current graph state containing the User's question
@@ -344,14 +469,25 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
 builder = StateGraph(OverallState, config_schema=Configuration)
 
 # Define the nodes we will cycle between
+builder.add_node("local_rag_search", local_rag_search)
 builder.add_node("generate_query", generate_query)
 builder.add_node("web_research", web_research)
 builder.add_node("reflection", reflection)
 builder.add_node("finalize_answer", finalize_answer)
+builder.add_node("finalize_answer_with_rag", finalize_answer_with_rag)
 
-# Set the entrypoint as `generate_query`
-# This means that this node is the first one called
-builder.add_edge(START, "generate_query")
+# Set the entrypoint as `local_rag_search`
+# 首先进行本地 RAG 检索
+builder.add_edge(START, "local_rag_search")
+
+# 根据 RAG 结果决定下一步
+builder.add_conditional_edges(
+    "local_rag_search", 
+    evaluate_rag_result, 
+    ["generate_query", "finalize_answer_with_rag"]
+)
+
+# 如果 RAG 不充分，继续原有的搜索流程
 # Add conditional edge to continue with search queries in a parallel branch
 builder.add_conditional_edges(
     "generate_query", continue_to_web_research, ["web_research"]
@@ -364,5 +500,15 @@ builder.add_conditional_edges(
 )
 # Finalize the answer
 builder.add_edge("finalize_answer", END)
+builder.add_edge("finalize_answer_with_rag", END)
 
-graph = builder.compile(name="pro-search-agent")
+graph = builder.compile(name="rag-enhanced-search-agent")
+
+# 保存图形结构
+try:
+    png_data = graph.get_graph().draw_mermaid_png()
+    with open("langgraph_structure.png", "wb") as f:
+        f.write(png_data)
+    print("✅ 图形结构已保存为 'langgraph_structure.png'")
+except Exception as e:
+    print(f"⚠️  无法生成图形: {e}")

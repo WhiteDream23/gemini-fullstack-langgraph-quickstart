@@ -12,6 +12,7 @@ dependencies = [
     "langgraph>=0.2.6",
     "langchain>=0.3.19",
     "langchain-openai",
+    "langchain-community",
     "python-dotenv>=1.0.1",
     "langgraph-sdk>=0.1.57",
     "langgraph-cli",
@@ -20,6 +21,11 @@ dependencies = [
     "openai",
     "tavily-python",
     "gradio>=4.0.0",
+    "faiss-cpu",
+    "sentence-transformers",
+    "pypdf",
+    "python-docx",
+    "unstructured",
 ]
 
 
