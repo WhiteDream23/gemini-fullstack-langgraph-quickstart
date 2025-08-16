@@ -24,6 +24,11 @@ class OverallState(TypedDict):
     rag_sufficient: bool
     rag_confidence: float
     use_local_knowledge: bool
+    # 意图澄清和研究简报状态
+    need_clarification: bool
+    clarification_question: str
+    research_brief: str
+    supervisor_messages: Annotated[list, add_messages]
 
 
 class ReflectionState(TypedDict):
@@ -40,6 +45,22 @@ class RAGState(TypedDict):
     rag_sufficient: bool
     rag_confidence: float
     evaluation_reason: str
+
+
+class ClarificationState(TypedDict):
+    """意图澄清状态"""
+    need_clarification: bool
+    question: str
+    verification: str
+    clarity_score: float
+
+
+class ResearchBriefState(TypedDict):
+    """研究简报状态"""
+    research_brief: str
+    research_scope: str
+    key_questions: list[str]
+    expected_sources: list[str]
 
 
 class Query(TypedDict):

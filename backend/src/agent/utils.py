@@ -1,6 +1,28 @@
 from typing import Any, Dict, List
+from datetime import datetime
 from langchain_core.messages import AnyMessage, AIMessage, HumanMessage
 
+def get_today_str() -> str:
+    """Get current date in a human-readable format."""
+    # Windows兼容的日期格式
+    now = datetime.now()
+    day = now.day  # 获取不带前导零的日期
+    return now.strftime(f"%a %b {day}, %Y")
+
+def get_buffer_string(messages):
+    """将消息列表转换为字符串"""
+    if not messages:
+        return "无对话历史"
+    
+    buffer_string = ""
+    for message in messages:
+        if hasattr(message, 'content'):
+            role = "用户" if message.__class__.__name__ == "HumanMessage" else "助手"
+            buffer_string += f"{role}: {message.content}\n"
+        else:
+            buffer_string += f"消息: {str(message)}\n"
+    
+    return buffer_string.strip()
 
 def get_research_topic(messages: List[AnyMessage]) -> str:
     """

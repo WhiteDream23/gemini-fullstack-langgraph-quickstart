@@ -28,6 +28,12 @@ class Configuration(BaseModel):
             "description": "The name of the language model to use for the agent's answer."
         },
     )
+    reasoning_model: str = Field(
+        default="Qwen/Qwen3-30B-A3B-Instruct-2507",
+        metadata={
+            "description": "The name of the language model to use for the agent's reasoning."
+        },
+    )
 
     number_of_initial_queries: int = Field(
         default=3,

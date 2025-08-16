@@ -1,6 +1,6 @@
 import os
 
-from agent.tools_and_schemas import SearchQueryList, Reflection
+from agent.tools_and_schemas import SearchQueryList, Reflection,ClarifyWithUser,ResearchQuestion
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Send
@@ -8,9 +8,10 @@ from langgraph.graph import StateGraph
 from langgraph.graph import START, END
 from langchain_core.runnables import RunnableConfig
 from tavily import TavilyClient
+from typing_extensions import Literal
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
-
+from langgraph.types import Command
 from agent.state import (
     OverallState,
     QueryGenerationState,
@@ -20,16 +21,21 @@ from agent.state import (
 )
 from agent.configuration import Configuration
 from agent.prompts import (
-    get_current_date,
     query_writer_instructions,
     web_searcher_instructions,
     reflection_instructions,
     answer_instructions,
+    clarify_with_user_instructions,
+    transform_messages_into_research_topic_prompt,
 )
+
 from langchain_openai import ChatOpenAI
 from agent.utils import (
     get_research_topic,
+    get_today_str,
+    get_buffer_string,
 )
+
 from agent.rag_tools import create_rag_tool, evaluate_rag_sufficiency
 
 load_dotenv()
@@ -48,6 +54,88 @@ memory = MemorySaver()
 
 
 # Nodes
+
+def clarify_with_user(state: OverallState, config: RunnableConfig)  -> Command[Literal["write_research_brief", "__end__"]]:
+    """
+    用户意图澄清节点
+    
+    分析用户的问题是否包含足够信息进行研究，
+    如果不够明确则生成澄清问题，否则确认理解。
+    """
+    configurable = Configuration.from_runnable_config(config)
+    
+    # 初始化模型
+    llm = ChatOpenAI(
+        model=configurable.reasoning_model,
+        temperature=0,
+        max_retries=2,
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+    )
+    
+    # 设置结构化输出
+    structured_output_model = llm.with_structured_output(ClarifyWithUser)
+    
+    # 调用模型进行意图澄清
+    response = structured_output_model.invoke([
+        HumanMessage(content=clarify_with_user_instructions.format(
+            messages=get_buffer_string(messages=state.get("messages", [])), 
+            date=get_today_str()
+        ))
+    ])
+    
+    # 更新状态
+    if response.need_clarification:
+        return Command(
+            goto=END, 
+            update={"messages": [AIMessage(content=response.question)],
+                    "need_clarification": True,}
+        )
+    else:
+        return Command(
+            goto="write_research_brief", 
+            update={"messages": [AIMessage(content=response.verification)],
+                     "need_clarification": False}
+        )
+
+
+def write_research_brief(state: OverallState, config: RunnableConfig) -> OverallState:
+    """
+    研究简报生成节点
+    
+    将对话历史转换为详细的研究简报，
+    为后续的RAG检索和网络搜索提供明确指导。
+    """
+    configurable = Configuration.from_runnable_config(config)
+    
+    # 初始化模型
+    llm = ChatOpenAI(
+        model=configurable.reasoning_model,
+        temperature=0,
+        max_retries=2,
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+    )
+    
+    # 设置结构化输出
+    structured_output_model = llm.with_structured_output(ResearchQuestion)
+    
+    # 生成研究简报
+    response = structured_output_model.invoke([
+        HumanMessage(content=transform_messages_into_research_topic_prompt.format(
+            messages=get_buffer_string(state.get("messages", [])),
+            date=get_today_str()
+        ))
+    ])
+    
+    # 更新状态
+    return {
+        "research_brief": response.research_brief,
+        "supervisor_messages": [HumanMessage(content=f"研究简报：{response.research_brief}")],
+        "messages": [AIMessage(content=f"📋 研究简报已生成：\n\n{response.research_brief}")]
+    }
+
+
 def local_rag_search(state: OverallState, config: RunnableConfig) -> RAGState:
     """本地 RAG 检索节点
     
@@ -57,7 +145,7 @@ def local_rag_search(state: OverallState, config: RunnableConfig) -> RAGState:
     configurable = Configuration.from_runnable_config(config)
     
     # 获取用户问题
-    user_question = get_research_topic(state["messages"])
+    user_question = get_research_topic(state["research_brief"])
     
     # 创建 LLM 实例
     llm = ChatOpenAI(
@@ -144,7 +232,7 @@ def finalize_answer_with_rag(state: OverallState, config: RunnableConfig):
 3. 保持回答的准确性和相关性
 4. 适当引用来源信息
 
-当前日期: {get_current_date()}
+当前日期: {get_today_str()}
 """
     
     # 初始化 LLM
@@ -197,7 +285,7 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     structured_llm = llm.with_structured_output(SearchQueryList)
 
     # Format the prompt
-    current_date = get_current_date()
+    current_date = get_today_str()
     formatted_prompt = query_writer_instructions.format(
         current_date=current_date,
         research_topic=get_research_topic(state["messages"]),
@@ -281,7 +369,7 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
         # Enhanced prompt for analysis
         analysis_prompt = f"""
         {web_searcher_instructions.format(
-            current_date=get_current_date(),
+            current_date=get_today_str(),
             research_topic=search_query,
         )}
         
@@ -315,7 +403,7 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
         
         fallback_prompt = f"""
         {web_searcher_instructions.format(
-            current_date=get_current_date(),
+            current_date=get_today_str(),
             research_topic=search_query,
         )}
         
@@ -353,7 +441,7 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
     reasoning_model = state.get("reasoning_model", configurable.reflection_model)
 
     # Format the prompt
-    current_date = get_current_date()
+    current_date = get_today_str()
     formatted_prompt = reflection_instructions.format(
         current_date=current_date,
         research_topic=get_research_topic(state["messages"]),
@@ -433,7 +521,7 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
     reasoning_model = state.get("reasoning_model") or configurable.answer_model
 
     # Format the prompt
-    current_date = get_current_date()
+    current_date = get_today_str()
     formatted_prompt = answer_instructions.format(
         current_date=current_date,
         research_topic=get_research_topic(state["messages"]),
@@ -468,7 +556,9 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
 # Create our Agent Graph
 builder = StateGraph(OverallState, config_schema=Configuration)
 
-# Define the nodes we will cycle between
+# Define all nodes in the workflow
+builder.add_node("clarify_with_user", clarify_with_user)
+builder.add_node("write_research_brief", write_research_brief)
 builder.add_node("local_rag_search", local_rag_search)
 builder.add_node("generate_query", generate_query)
 builder.add_node("web_research", web_research)
@@ -476,33 +566,36 @@ builder.add_node("reflection", reflection)
 builder.add_node("finalize_answer", finalize_answer)
 builder.add_node("finalize_answer_with_rag", finalize_answer_with_rag)
 
-# Set the entrypoint as `local_rag_search`
-# 首先进行本地 RAG 检索
-builder.add_edge(START, "local_rag_search")
+# 新的工作流程：
+# 1. 首先进行意图澄清
+builder.add_edge(START, "clarify_with_user")
 
-# 根据 RAG 结果决定下一步
+builder.add_edge(
+    "write_research_brief",
+    "local_rag_search"
+)
+
+# 5. 本地 RAG 检索（原有逻辑保持不变）
 builder.add_conditional_edges(
     "local_rag_search", 
     evaluate_rag_result, 
     ["generate_query", "finalize_answer_with_rag"]
 )
 
-# 如果 RAG 不充分，继续原有的搜索流程
-# Add conditional edge to continue with search queries in a parallel branch
+# 6. 网络搜索流程（原有逻辑保持不变）
 builder.add_conditional_edges(
     "generate_query", continue_to_web_research, ["web_research"]
 )
-# Reflect on the web research
 builder.add_edge("web_research", "reflection")
-# Evaluate the research
 builder.add_conditional_edges(
     "reflection", evaluate_research, ["web_research", "finalize_answer"]
 )
-# Finalize the answer
+
+# 7. 结束节点
 builder.add_edge("finalize_answer", END)
 builder.add_edge("finalize_answer_with_rag", END)
 
-graph = builder.compile(name="rag-enhanced-search-agent")
+graph = builder.compile(name="intent-clarification-rag-enhanced-search-agent")
 
 # 保存图形结构
 try:
