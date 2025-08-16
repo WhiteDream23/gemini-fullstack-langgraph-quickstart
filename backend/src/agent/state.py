@@ -29,6 +29,8 @@ class OverallState(TypedDict):
     clarification_question: str
     research_brief: str
     supervisor_messages: Annotated[list, add_messages]
+    #  保存文件相关
+    save_result: str
 
 
 class ReflectionState(TypedDict):

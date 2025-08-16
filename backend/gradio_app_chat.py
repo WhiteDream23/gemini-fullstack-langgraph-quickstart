@@ -10,6 +10,7 @@ import json
 from typing import List, Dict, Any, Tuple
 import time
 import tempfile
+import asyncio
 from pathlib import Path
 import traceback
 
@@ -38,7 +39,7 @@ class ChatResearchAgent:
             session_id = self.create_session(session_id)
         return self.sessions[session_id]
     
-    def chat_with_agent(self, message: str, history: List[List[str]], session_id: str = "default") -> Tuple[str, List[List[str]]]:
+    async def chat_with_agent(self, message: str, history: List[List[str]], session_id: str = "default") -> Tuple[str, List[List[str]]]:
         """与代理进行对话"""
         if not message.strip():
             return "", history
@@ -65,7 +66,7 @@ class ChatResearchAgent:
                 state["messages"].append(HumanMessage(content=message))
             
             # 执行图
-            result = graph.invoke(state)
+            result = await graph.ainvoke(state)
             
             # 保存会话状态
             session["conversation_state"] = result
@@ -462,6 +463,10 @@ def create_chat_interface():
         # 事件绑定
         def handle_send(message, history, session_id):
             return chat_agent.chat_with_agent(message, history, session_id)
+        def handle_send_async(message, history, session_id):
+            """异步事件处理包装器"""
+            return asyncio.run(chat_agent.chat_with_agent(message, history, session_id))
+
         
         def handle_clear(session_id):
             chat_agent.clear_session(session_id)
@@ -472,7 +477,7 @@ def create_chat_interface():
         
         # 发送消息
         send_btn.click(
-            fn=handle_send,
+            fn=handle_send_async,
             inputs=[msg_input, chatbot, session_id],
             outputs=[msg_input, chatbot],
             show_progress=True

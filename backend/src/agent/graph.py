@@ -1,5 +1,5 @@
 import os
-
+import asyncio
 from agent.tools_and_schemas import SearchQueryList, Reflection,ClarifyWithUser,ResearchQuestion
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from tavily import TavilyClient
 from typing_extensions import Literal
 from langgraph.prebuilt import create_react_agent
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from agent.state import (
@@ -36,7 +37,7 @@ from agent.utils import (
     get_buffer_string,
 )
 
-from agent.rag_tools import create_rag_tool, evaluate_rag_sufficiency
+from agent.agent_tools import create_rag_tool, evaluate_rag_sufficiency,save_file
 
 load_dotenv()
 
@@ -524,7 +525,7 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
     current_date = get_today_str()
     formatted_prompt = answer_instructions.format(
         current_date=current_date,
-        research_topic=get_research_topic(state["messages"]),
+        research_topic=get_research_topic(state["research_brief"]),
         summaries="\n---\n\n".join(state["web_research_result"]),
     )
 
@@ -553,6 +554,68 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
     }
 
 
+
+async def save_file_node(state: OverallState, config: RunnableConfig) -> OverallState:
+    """LangGraph node that saves the research report to a file.
+
+    Args:
+        state: Current graph state containing the running summary and sources gathered
+
+    Returns:
+        Command to indicate the end of the workflow
+    """
+    # Implement file saving logic here
+    configurable = Configuration.from_runnable_config(config)
+    reasoning_model = state.get("reasoning_model") or configurable.answer_model
+
+    # init Qwen Model, default to Qwen3-30B
+    llm = ChatOpenAI(
+        model=reasoning_model,
+        temperature=0,
+        max_retries=2,
+        api_key=os.getenv("OPENAI_API_KEY"),
+        base_url=os.getenv("OPENAI_BASE_URL", "https://api-inference.modelscope.cn/v1"),
+    )
+    client = MultiServerMCPClient(
+    {
+        "GITHUB": {
+            "url": os.getenv("GITHUB_TOKEN_KEY"),
+            "transport": "sse"
+        }
+
+    }
+)
+    tools = await asyncio.wait_for(client.get_tools(), timeout=25)
+    tools.append(save_file)
+    agent_executor = create_react_agent(llm, tools, checkpointer=memory)
+
+    try:
+        # 执行 RAG 检索
+        save_prompt = f"""请将下面的内容保存到knowledge文件夹中：{state['messages'][-1].content},保存文件名为{state['research_brief'][:10]}.md,
+        同时在我的mydeepresearch_note github仓库中创建相同的文件
+        """
+        
+        result = await agent_executor.ainvoke(
+            {"messages": [HumanMessage(content=save_prompt)]},
+        )
+        
+        # 提取结果
+        save_result = ""
+        if result.get("messages"):
+            save_result = result["messages"][-1].content
+        
+        return {
+            "save_result": save_result,
+        }
+        
+    except Exception as e:
+        return {
+            "save_result": f"本地保存文件检索失败: {str(e)}",
+        }
+
+
+
+
 # Create our Agent Graph
 builder = StateGraph(OverallState, config_schema=Configuration)
 
@@ -564,6 +627,7 @@ builder.add_node("generate_query", generate_query)
 builder.add_node("web_research", web_research)
 builder.add_node("reflection", reflection)
 builder.add_node("finalize_answer", finalize_answer)
+builder.add_node("save_file", save_file_node)
 builder.add_node("finalize_answer_with_rag", finalize_answer_with_rag)
 
 # 新的工作流程：
@@ -592,7 +656,8 @@ builder.add_conditional_edges(
 )
 
 # 7. 结束节点
-builder.add_edge("finalize_answer", END)
+builder.add_edge("finalize_answer", "save_file")
+builder.add_edge("save_file", END)
 builder.add_edge("finalize_answer_with_rag", END)
 
 graph = builder.compile(name="intent-clarification-rag-enhanced-search-agent")

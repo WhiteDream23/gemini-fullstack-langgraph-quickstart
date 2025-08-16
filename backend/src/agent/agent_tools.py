@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Type
-from langchain.tools import BaseTool
+from langchain.tools import BaseTool,tool
 # from langchain.pydantic_v1 import BaseModel, Field
 from pydantic import BaseModel,Field
 from agent.knowledge_base import knowledge_base
@@ -105,3 +105,45 @@ def evaluate_rag_sufficiency(rag_result: str, original_query: str) -> Dict[str, 
         "reason": reason,
         "rag_content": rag_result
     }
+
+
+@tool
+def save_file(contents: str, file_name: str, overwrite: bool = True, save_dir: str = "") -> str:
+    """将文本内容保存到文件中
+    
+    这个工具用于保存任何文本内容到指定文件，包括：
+    - 搜索结果、网页内容、分析报告
+    - JSON数据、CSV数据、Markdown文档
+    - 处理后的数据或最终结果
+    
+    Args:
+        contents: 要保存的文本内容（支持任何格式：纯文本、JSON、Markdown、CSV等）
+        file_name: 文件名（建议包含扩展名，如：report.md、data.json、results.txt）
+        overwrite: 是否覆盖已存在的文件（默认True，设为False时文件存在则不覆盖）
+        save_dir: 保存目录路径（默认为"output"目录，会自动创建）
+        
+    Returns:
+        成功时返回保存的文件名，失败时返回错误信息
+        
+    使用示例：
+    - save_file("搜索结果内容", "search_result.md")
+    - save_file('{"key": "value"}', "data.json")
+    - save_file("分析报告内容", "analysis_report.txt", save_dir="reports")
+    """
+    try:
+        if save_dir:
+            save_dir = Path(save_dir)
+        else:
+            save_dir = Path("output")
+        
+        file_path = save_dir.joinpath(file_name)
+        if not file_path.parent.exists():
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if file_path.exists() and not overwrite:
+            return f"File {file_name} already exists"
+        
+        file_path.write_text(contents, encoding='utf-8')
+        return str(file_name)
+    except Exception as e:
+        return f"Error saving to file: {e}"
