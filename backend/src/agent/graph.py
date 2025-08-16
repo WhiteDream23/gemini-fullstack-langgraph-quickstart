@@ -214,7 +214,7 @@ def finalize_answer_with_rag(state: OverallState, config: RunnableConfig):
     reasoning_model = state.get("reasoning_model") or configurable.answer_model
     
     # 获取用户问题和 RAG 结果
-    user_question = get_research_topic(state["messages"])
+    user_question = get_research_topic(state["research_brief"])
     rag_content = state.get("rag_result", "")
     
     # 创建基于 RAG 的回答提示
@@ -288,7 +288,7 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     current_date = get_today_str()
     formatted_prompt = query_writer_instructions.format(
         current_date=current_date,
-        research_topic=get_research_topic(state["messages"]),
+        research_topic=get_research_topic(state["research_brief"]),
         number_queries=state["initial_search_query_count"],
     )
     # Generate the search queries
@@ -444,7 +444,7 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
     current_date = get_today_str()
     formatted_prompt = reflection_instructions.format(
         current_date=current_date,
-        research_topic=get_research_topic(state["messages"]),
+        research_topic=get_research_topic(state["research_brief"]),
         summaries="\n\n---\n\n".join(state["web_research_result"]),
     )
     # init Qwen Model
