@@ -257,16 +257,16 @@ def finalize_answer_with_rag(state: OverallState, config: RunnableConfig):
 
 
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
-    """LangGraph node that generates search queries based on the User's question.
+    """基于用户问题生成搜索查询的 LangGraph 节点。
 
     当本地 RAG 检索不足时，使用 Qwen 模型创建网络搜索查询。
 
     Args:
-        state: Current graph state containing the User's question
-        config: Configuration for the runnable, including LLM provider settings
+        state: 包含用户问题的当前图状态
+        config: 可运行对象的配置，包括 LLM 提供商设置
 
     Returns:
-        Dictionary with state update, including search_query key containing the generated queries
+        包含状态更新的字典，包括含有生成查询的 search_query 键
     """
     configurable = Configuration.from_runnable_config(config)
 
@@ -298,9 +298,9 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
 
 
 def continue_to_web_research(state: QueryGenerationState):
-    """LangGraph node that sends the search queries to the web research node.
+    """将搜索查询发送到网络研究节点的 LangGraph 节点。
 
-    This is used to spawn n number of web research nodes, one for each search query.
+    用于生成 n 个网络研究节点，每个搜索查询对应一个节点。
     """
     return [
         Send("web_research", {"search_query": search_query, "id": int(idx)})
@@ -309,17 +309,17 @@ def continue_to_web_research(state: QueryGenerationState):
 
 
 def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
-    """LangGraph node that performs web research using Tavily Search API.
+    """使用 Tavily 搜索 API 执行网络研究的 LangGraph 节点。
 
-    Executes a web search using Tavily API and then uses Qwen model to analyze
-    and summarize the search results.
+    使用 Tavily API 执行网络搜索，然后使用 Qwen 模型分析
+    和总结搜索结果。
 
     Args:
-        state: Current graph state containing the search query and research loop count
-        config: Configuration for the runnable, including search API settings
+        state: 包含搜索查询和研究循环计数的当前图状态
+        config: 可运行对象的配置，包括搜索 API 设置
 
     Returns:
-        Dictionary with state update, including sources_gathered, research_loop_count, and web_research_results
+        包含状态更新的字典，包括 sources_gathered、research_loop_count 和 web_research_results
     """
     # Configure
     configurable = Configuration.from_runnable_config(config)
@@ -423,18 +423,18 @@ def web_research(state: WebSearchState, config: RunnableConfig) -> OverallState:
 
 
 def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
-    """LangGraph node that identifies knowledge gaps and generates potential follow-up queries.
+    """识别知识空白并生成潜在后续查询的 LangGraph 节点。
 
-    Analyzes the current summary to identify areas for further research and generates
-    potential follow-up queries. Uses structured output to extract
-    the follow-up query in JSON format.
+    分析当前摘要以识别需要进一步研究的领域，并生成
+    潜在的后续查询。使用结构化输出以 JSON 格式提取
+    后续查询。
 
     Args:
-        state: Current graph state containing the running summary and research topic
-        config: Configuration for the runnable, including LLM provider settings
+        state: 包含运行摘要和研究主题的当前图状态
+        config: 可运行对象的配置，包括 LLM 提供商设置
 
     Returns:
-        Dictionary with state update, including search_query key containing the generated follow-up query
+        包含状态更新的字典，包括含有生成的后续查询的 search_query 键
     """
     configurable = Configuration.from_runnable_config(config)
     # Increment the research loop count and get the reasoning model
@@ -472,17 +472,17 @@ def evaluate_research(
     state: ReflectionState,
     config: RunnableConfig,
 ) -> OverallState:
-    """LangGraph routing function that determines the next step in the research flow.
+    """决定研究流程下一步的 LangGraph 路由函数。
 
-    Controls the research loop by deciding whether to continue gathering information
-    or to finalize the summary based on the configured maximum number of research loops.
+    通过决定是否继续收集信息或基于配置的最大研究循环次数
+    完成摘要来控制研究循环。
 
     Args:
-        state: Current graph state containing the research loop count
-        config: Configuration for the runnable, including max_research_loops setting
+        state: 包含研究循环计数的当前图状态
+        config: 可运行对象的配置，包括 max_research_loops 设置
 
     Returns:
-        String literal indicating the next node to visit ("web_research" or "finalize_summary")
+        指示下一个要访问的节点的字符串字面量（"web_research" 或 "finalize_summary"）
     """
     configurable = Configuration.from_runnable_config(config)
     max_research_loops = (
@@ -506,17 +506,17 @@ def evaluate_research(
 
 
 def finalize_answer(state: OverallState, config: RunnableConfig):
-    """LangGraph node that finalizes the research summary.
+    """完成研究摘要的 LangGraph 节点。
 
-    Prepares the final output by deduplicating and formatting sources, then
-    combining them with the running summary to create a well-structured
-    research report with proper citations.
+    通过去重和格式化来源来准备最终输出，然后
+    将它们与运行摘要结合以创建结构良好的
+    带有适当引用的研究报告。
 
     Args:
-        state: Current graph state containing the running summary and sources gathered
+        state: 包含运行摘要和收集来源的当前图状态
 
     Returns:
-        Dictionary with state update, including running_summary key containing the formatted final summary with sources
+        包含状态更新的字典，包括含有格式化的最终摘要和来源的 running_summary 键
     """
     configurable = Configuration.from_runnable_config(config)
     reasoning_model = state.get("reasoning_model") or configurable.answer_model
@@ -556,13 +556,13 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
 
 
 async def save_file_node(state: OverallState, config: RunnableConfig) -> OverallState:
-    """LangGraph node that saves the research report to a file.
+    """将研究报告保存到文件的 LangGraph 节点。
 
     Args:
-        state: Current graph state containing the running summary and sources gathered
+        state: 包含运行摘要和收集来源的当前图状态
 
     Returns:
-        Command to indicate the end of the workflow
+        指示工作流结束的命令
     """
     # Implement file saving logic here
     configurable = Configuration.from_runnable_config(config)

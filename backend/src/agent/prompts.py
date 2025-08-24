@@ -1,176 +1,176 @@
 
 
 clarify_with_user_instructions="""
-These are the messages that have been exchanged so far from the user asking for the report:
+这些是到目前为止用户要求报告时交换的消息：
 <Messages>
 {messages}
 </Messages>
 
-Today's date is {date}.
+今天的日期是 {date}。
 
-Assess whether you need to ask a clarifying question, or if the user has already provided enough information for you to start research.
-IMPORTANT: If you can see in the messages history that you have already asked a clarifying question, you almost always do not need to ask another one. Only ask another question if ABSOLUTELY NECESSARY.
+评估是否需要询问澄清问题，或者用户是否已经提供了足够的信息让您开始研究。
+重要提示：如果您在消息历史中能看到您已经问过澄清问题，几乎总是不需要再问另一个问题。只有在绝对必要时才询问另一个问题。
 
-If there are acronyms, abbreviations, or unknown terms, ask the user to clarify.
-If you need to ask a question, follow these guidelines:
-- Be concise while gathering all necessary information
-- Make sure to gather all the information needed to carry out the research task in a concise, well-structured manner.
-- Use bullet points or numbered lists if appropriate for clarity. Make sure that this uses markdown formatting and will be rendered correctly if the string output is passed to a markdown renderer.
-- Don't ask for unnecessary information, or information that the user has already provided. If you can see that the user has already provided the information, do not ask for it again.
+如果有缩写词、简称或未知术语，请要求用户澄清。
+如果需要询问问题，请遵循以下准则：
+- 在收集所有必要信息的同时保持简洁
+- 确保以简洁、结构良好的方式收集执行研究任务所需的所有信息。
+- 如果适当，使用项目符号或编号列表以保持清晰。确保使用 markdown 格式，如果字符串输出传递给 markdown 渲染器时能正确渲染。
+- 不要询问不必要的信息，或用户已经提供的信息。如果您能看到用户已经提供了信息，不要再次询问。
 
-Respond in valid JSON format with these exact keys:
+以有效的 JSON 格式响应，使用这些确切的键：
 "need_clarification": boolean,
-"question": "<question to ask the user to clarify the report scope>",
-"verification": "<verification message that we will start research>"
+"question": "<询问用户澄清报告范围的问题>",
+"verification": "<我们将开始研究的验证消息>"
 
-If you need to ask a clarifying question, return:
+如果需要询问澄清问题，返回：
 "need_clarification": true,
-"question": "<your clarifying question>",
+"question": "<您的澄清问题>",
 "verification": ""
 
-If you do not need to ask a clarifying question, return:
+如果不需要询问澄清问题，返回：
 "need_clarification": false,
 "question": "",
-"verification": "<acknowledgement message that you will now start research based on the provided information>"
+"verification": "<确认消息，表示您现在将基于提供的信息开始研究>"
 
-For the verification message when no clarification is needed:
-- Acknowledge that you have sufficient information to proceed
-- Briefly summarize the key aspects of what you understand from their request
-- Confirm that you will now begin the research process
-- Keep the message concise and professional
+对于不需要澄清时的验证消息：
+- 确认您有足够的信息继续进行
+- 简要总结您从他们请求中理解的关键方面
+- 确认您现在将开始研究过程
+- 保持消息简洁和专业
 """
 
-transform_messages_into_research_topic_prompt = """You will be given a set of messages that have been exchanged so far between yourself and the user. 
-Your job is to translate these messages into a more detailed and concrete research question that will be used to guide the research.
+transform_messages_into_research_topic_prompt = """您将获得到目前为止您与用户之间交换的一组消息。
+您的工作是将这些消息转换为更详细和具体的研究问题，该问题将用于指导研究。
 
-The messages that have been exchanged so far between yourself and the user are:
+到目前为止您与用户之间交换的消息为：
 <Messages>
 {messages}
 </Messages>
 
-Today's date is {date}.
+今天的日期是 {date}。
 
-You will return a single research question that will be used to guide the research.
+您将返回一个用于指导研究的单一研究问题。
 
-Guidelines:
-1. Maximize Specificity and Detail
-- Include all known user preferences and explicitly list key attributes or dimensions to consider.
-- It is important that all details from the user are included in the instructions.
+指导原则：
+1. 最大化具体性和细节
+- 包含所有已知的用户偏好，并明确列出要考虑的关键属性或维度。
+- 重要的是将用户的所有细节包含在指令中。
 
-2. Handle Unstated Dimensions Carefully
-- When research quality requires considering additional dimensions that the user hasn't specified, acknowledge them as open considerations rather than assumed preferences.
-- Example: Instead of assuming "budget-friendly options," say "consider all price ranges unless cost constraints are specified."
-- Only mention dimensions that are genuinely necessary for comprehensive research in that domain.
+2. 谨慎处理未声明的维度
+- 当研究质量需要考虑用户未指定的额外维度时，将它们视为开放考虑而非假设偏好。
+- 示例：不要假设"预算友好选项"，而是说"除非指定成本约束，否则考虑所有价格范围"。
+- 只提及在该领域进行全面研究真正必要的维度。
 
-3. Avoid Unwarranted Assumptions
-- Never invent specific user preferences, constraints, or requirements that weren't stated.
-- If the user hasn't provided a particular detail, explicitly note this lack of specification.
-- Guide the researcher to treat unspecified aspects as flexible rather than making assumptions.
+3. 避免无根据的假设
+- 永远不要编造用户未声明的特定偏好、约束或要求。
+- 如果用户未提供特定细节，明确指出这种规范的缺乏。
+- 指导研究人员将未指定的方面视为灵活的，而不是做假设。
 
-4. Distinguish Between Research Scope and User Preferences
-- Research scope: What topics/dimensions should be investigated (can be broader than user's explicit mentions)
-- User preferences: Specific constraints, requirements, or preferences (must only include what user stated)
-- Example: "Research coffee quality factors (including bean sourcing, roasting methods, brewing techniques) for San Francisco coffee shops, with primary focus on taste as specified by the user."
+4. 区分研究范围和用户偏好
+- 研究范围：应该调查的主题/维度（可以比用户明确提及的更广泛）
+- 用户偏好：特定约束、要求或偏好（必须只包含用户声明的内容）
+- 示例："研究旧金山咖啡店的咖啡质量因素（包括豆子采购、烘焙方法、冲泡技术），主要关注用户指定的口味。"
 
-5. Use the First Person
-- Phrase the request from the perspective of the user.
+5. 使用第一人称
+- 从用户的角度表述请求。
 
-6. Sources
-- If specific sources should be prioritized, specify them in the research question.
-- For product and travel research, prefer linking directly to official or primary websites (e.g., official brand sites, manufacturer pages, or reputable e-commerce platforms like Amazon for user reviews) rather than aggregator sites or SEO-heavy blogs.
-- For academic or scientific queries, prefer linking directly to the original paper or official journal publication rather than survey papers or secondary summaries.
-- For people, try linking directly to their LinkedIn profile, or their personal website if they have one.
-- If the query is in a specific language, prioritize sources published in that language.
+6. 信息源
+- 如果应该优先考虑特定来源，在研究问题中指定它们。
+- 对于产品和旅行研究，优先链接到官方或主要网站（例如，官方品牌网站、制造商页面或像亚马逊这样的信誉良好的电商平台以获得用户评价），而不是聚合网站或SEO密集的博客。
+- 对于学术或科学查询，优先链接到原始论文或官方期刊出版物，而不是综述论文或二次摘要。
+- 对于人物，尝试直接链接到他们的LinkedIn个人资料，或者如果他们有个人网站的话。
+- 如果查询是特定语言，优先考虑以该语言发布的来源。
 
-Respond in valid JSON format with these exact keys:
-"research_brief": "<research question that will be used to guide the research.>",
+以有效的JSON格式响应，使用这些确切的键：
+"research_brief": "<将用于指导研究的研究问题。>",
 
 """
 
-query_writer_instructions = """Your goal is to generate sophisticated and diverse web search queries. These queries are intended for an advanced automated web research tool capable of analyzing complex results, following links, and synthesizing information.
+query_writer_instructions = """您的目标是生成复杂且多样化的网络搜索查询。这些查询旨在用于能够分析复杂结果、跟踪链接和综合信息的高级自动化网络研究工具。
 
-Instructions:
-- Always prefer a single search query, only add another query if the original question requests multiple aspects or elements and one query is not enough.
-- Each query should focus on one specific aspect of the original question.
-- Don't produce more than {number_queries} queries.
-- Queries should be diverse, if the topic is broad, generate more than 1 query.
-- Don't generate multiple similar queries, 1 is enough.
-- Query should ensure that the most current information is gathered. The current date is {current_date}.
+指令：
+- 始终优先使用单个搜索查询，只有当原始问题请求多个方面或元素且一个查询不够时才添加另一个查询。
+- 每个查询应专注于原始问题的一个特定方面。
+- 不要产生超过 {number_queries} 个查询。
+- 查询应该多样化，如果主题广泛，生成超过1个查询。
+- 不要生成多个相似的查询，1个就足够了。
+- 查询应确保收集最新信息。当前日期是 {current_date}。
 
-Format: 
-- Format your response as a JSON object with ALL two of these exact keys:
-   - "rationale": Brief explanation of why these queries are relevant
-   - "query": A list of search queries
+格式：
+- 将您的响应格式化为具有所有这两个确切键的JSON对象：
+   - "rationale": 简要解释为什么这些查询相关
+   - "query": 搜索查询列表
 
-Example:
+示例：
 
-Topic: What revenue grew more last year apple stock or the number of people buying an iphone
+主题：去年苹果股票或购买iPhone的人数，哪个收入增长更多
 ```json
 {{
-    "rationale": "To answer this comparative growth question accurately, we need specific data points on Apple's stock performance and iPhone sales metrics. These queries target the precise financial information needed: company revenue trends, product-specific unit sales figures, and stock price movement over the same fiscal period for direct comparison.",
-    "query": ["Apple total revenue growth fiscal year 2024", "iPhone unit sales growth fiscal year 2024", "Apple stock price growth fiscal year 2024"],
+    "rationale": "为了准确回答这个比较增长问题，我们需要苹果股票表现和iPhone销售指标的具体数据点。这些查询针对所需的精确财务信息：公司收入趋势、产品特定单位销售数字，以及同一财政期间的股价走势，以便直接比较。",
+    "query": ["苹果2024财年总收入增长", "iPhone 2024财年单位销售增长", "苹果2024财年股价增长"],
 }}
 ```
 
-Context: {research_topic}"""
+上下文：{research_topic}"""
 
-web_searcher_instructions = """Conduct targeted Google Searches to gather the most recent, credible information on "{research_topic}" and synthesize it into a verifiable text artifact.
+web_searcher_instructions = """进行有针对性的Google搜索，收集关于"{research_topic}"的最新、可信信息，并将其综合成可验证的文本工件。
 
-Instructions:
-- Query should ensure that the most current information is gathered. The current date is {current_date}.
-- Conduct multiple, diverse searches to gather comprehensive information.
-- Consolidate key findings while meticulously tracking the source(s) for each specific piece of information.
-- The output should be a well-written summary or report based on your search findings. 
-- Only include the information found in the search results, don't make up any information.
+指令：
+- 查询应确保收集最新信息。当前日期是 {current_date}。
+- 进行多次、多样化的搜索以收集全面信息。
+- 整合关键发现，同时细致跟踪每个特定信息的来源。
+- 输出应该是基于您的搜索结果的写作良好的摘要或报告。
+- 只包含在搜索结果中找到的信息，不要编造任何信息。
 
-Research Topic:
+研究主题：
 {research_topic}
 """
 
-reflection_instructions = """You are an expert research assistant analyzing summaries about "{research_topic}".
+reflection_instructions = """您是一位专家研究助手，正在分析关于"{research_topic}"的摘要。
 
-Instructions:
-- Identify knowledge gaps or areas that need deeper exploration and generate a follow-up query. (1 or multiple).
-- If provided summaries are sufficient to answer the user's question, don't generate a follow-up query.
-- If there is a knowledge gap, generate a follow-up query that would help expand your understanding.
-- Focus on technical details, implementation specifics, or emerging trends that weren't fully covered.
+指令：
+- 识别知识空白或需要更深入探索的领域，并生成后续查询（1个或多个）。
+- 如果提供的摘要足以回答用户的问题，则不生成后续查询。
+- 如果存在知识空白，生成有助于扩展您理解的后续查询。
+- 关注技术细节、实施具体细节或未完全涵盖的新兴趋势。
 
-Requirements:
-- Ensure the follow-up query is self-contained and includes necessary context for web search.
+要求：
+- 确保后续查询是自包含的，并包含网络搜索所需的必要上下文。
 
-Output Format:
-- Format your response as a JSON object with these exact keys:
-   - "is_sufficient": true or false
-   - "knowledge_gap": Describe what information is missing or needs clarification
-   - "follow_up_queries": Write a specific question to address this gap
+输出格式：
+- 将您的响应格式化为具有这些确切键的JSON对象：
+   - "is_sufficient": true 或 false
+   - "knowledge_gap": 描述缺少什么信息或需要澄清什么
+   - "follow_up_queries": 写一个特定问题来解决这个空白
 
-Example:
+示例：
 ```json
 {{
-    "is_sufficient": true, // or false
-    "knowledge_gap": "The summary lacks information about performance metrics and benchmarks", // "" if is_sufficient is true
-    "follow_up_queries": ["What are typical performance benchmarks and metrics used to evaluate [specific technology]?"] // [] if is_sufficient is true
+    "is_sufficient": true, // 或 false
+    "knowledge_gap": "摘要缺乏性能指标和基准信息", // 如果 is_sufficient 为 true 则为 ""
+    "follow_up_queries": ["用于评估[特定技术]的典型性能基准和指标是什么？"] // 如果 is_sufficient 为 true 则为 []
 }}
 ```
 
-Reflect carefully on the Summaries to identify knowledge gaps and produce a follow-up query. Then, produce your output following this JSON format:
+仔细反思摘要以识别知识空白并产生后续查询。然后，按照以下JSON格式产生您的输出：
 
-Summaries:
+摘要：
 {summaries}
 """
 
-answer_instructions = """Generate a high-quality answer to the user's question based on the provided summaries.
+answer_instructions = """基于提供的摘要为用户的问题生成高质量的答案。
 
-Instructions:
-- The current date is {current_date}.
-- You are the final step of a multi-step research process, don't mention that you are the final step. 
-- You have access to all the information gathered from the previous steps.
-- You have access to the user's question.
-- Generate a high-quality answer to the user's question based on the provided summaries and the user's question.
-- Include the sources you used from the Summaries in the answer correctly, use markdown format (e.g. [apnews](https://vertexaisearch.cloud.google.com/id/1-0)). THIS IS A MUST.
+指令：
+- 当前日期是 {current_date}。
+- 您是多步骤研究过程的最后一步，不要提及您是最后一步。
+- 您可以访问从前面步骤收集的所有信息。
+- 您可以访问用户的问题。
+- 基于提供的摘要和用户的问题为用户的问题生成高质量的答案。
+- 在答案中正确包含您从摘要中使用的来源，使用markdown格式（例如 [apnews](https://vertexaisearch.cloud.google.com/id/1-0)）。这是必须的。
 
-User Context:
+用户上下文：
 - {research_topic}
 
-Summaries:
+摘要：
 {summaries}"""
