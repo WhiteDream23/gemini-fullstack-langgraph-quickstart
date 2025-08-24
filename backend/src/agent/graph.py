@@ -56,7 +56,7 @@ memory = MemorySaver()
 
 # Nodes
 
-def clarify_with_user(state: OverallState, config: RunnableConfig)  -> Command[Literal["write_research_brief", "__end__"]]:
+def clarify_with_user(state: OverallState, config: RunnableConfig)  -> Command[Literal["local_rag_search", "__end__"]]:
     """
     用户意图澄清节点
     
@@ -94,9 +94,10 @@ def clarify_with_user(state: OverallState, config: RunnableConfig)  -> Command[L
         )
     else:
         return Command(
-            goto="write_research_brief", 
+            goto="local_rag_search", 
             update={"messages": [AIMessage(content=response.verification)],
-                     "need_clarification": False}
+                     "need_clarification": False,
+                     "research_brief": response.research_topic}
         )
 
 
@@ -146,7 +147,7 @@ def local_rag_search(state: OverallState, config: RunnableConfig) -> RAGState:
     configurable = Configuration.from_runnable_config(config)
     
     # 获取用户问题
-    user_question = get_research_topic(state["research_brief"])
+    user_question = state["research_brief"]
     
     # 创建 LLM 实例
     llm = ChatOpenAI(
@@ -289,7 +290,7 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     current_date = get_today_str()
     formatted_prompt = query_writer_instructions.format(
         current_date=current_date,
-        research_topic=get_research_topic(state["research_brief"]),
+        research_topic=state["research_brief"],
         number_queries=state["initial_search_query_count"],
     )
     # Generate the search queries
@@ -634,7 +635,7 @@ builder = StateGraph(OverallState, config_schema=Configuration)
 
 # Define all nodes in the workflow
 builder.add_node("clarify_with_user", clarify_with_user)
-builder.add_node("write_research_brief", write_research_brief)
+# builder.add_node("write_research_brief", write_research_brief)
 builder.add_node("local_rag_search", local_rag_search)
 builder.add_node("generate_query", generate_query)
 builder.add_node("web_research", web_research)
@@ -648,10 +649,10 @@ builder.add_node("finalize_answer_with_rag", finalize_answer_with_rag)
 # 1. 首先进行意图澄清
 builder.add_edge(START, "clarify_with_user")
 
-builder.add_edge(
-    "write_research_brief",
-    "local_rag_search"
-)
+# builder.add_edge(
+#     "write_research_brief",
+#     "local_rag_search"
+# )
 
 # 5. 本地 RAG 检索（原有逻辑保持不变）
 builder.add_conditional_edges(

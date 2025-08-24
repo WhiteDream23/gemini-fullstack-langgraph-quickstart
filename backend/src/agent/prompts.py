@@ -21,17 +21,20 @@ clarify_with_user_instructions="""
 以有效的 JSON 格式响应，使用这些确切的键：
 "need_clarification": boolean,
 "question": "<询问用户澄清报告范围的问题>",
-"verification": "<我们将开始研究的验证消息>"
+"verification": "<我们将开始研究的验证消息>",
+"research_topic": "<我们要进行的研究主题>"
 
 如果需要询问澄清问题，返回：
 "need_clarification": true,
 "question": "<您的澄清问题>",
-"verification": ""
+"verification": "",
+"research_topic": ""
 
 如果不需要询问澄清问题，返回：
 "need_clarification": false,
 "question": "",
-"verification": "<确认消息，表示您现在将基于提供的信息开始研究>"
+"verification": "<确认消息，表示您现在将基于提供的信息开始研究>",
+"research_topic": "<我们要进行的研究主题>"
 
 对于不需要澄清时的验证消息：
 - 确认您有足够的信息继续进行

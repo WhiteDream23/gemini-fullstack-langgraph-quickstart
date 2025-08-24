@@ -10,7 +10,6 @@ class SearchQueryList(BaseModel):
         description="A brief explanation of why these queries are relevant to the research topic."
     )
 
-
 class Reflection(BaseModel):
     is_sufficient: bool = Field(
         description="Whether the provided summaries are sufficient to answer the user's question."
@@ -33,6 +32,9 @@ class ClarifyWithUser(BaseModel):
     )
     verification: str = Field(
         description="Verify message that we will start research after the user has provided the necessary information.",
+    )
+    research_topic: str = Field(
+        description="The research topic we will be investigating.",
     )
 
 class ResearchQuestion(BaseModel):
