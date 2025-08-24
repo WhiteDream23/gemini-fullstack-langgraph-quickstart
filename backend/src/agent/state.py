@@ -30,7 +30,9 @@ class OverallState(TypedDict):
     research_brief: str
     supervisor_messages: Annotated[list, add_messages]
     #  保存文件相关
-    save_result: str
+    awaiting_user_decision: bool  # 是否等待用户决定
+    save_permission: str  # 用户的保存决定: "save" | "skip" | None
+    save_result: str  # 保存结果
 
 
 class ReflectionState(TypedDict):

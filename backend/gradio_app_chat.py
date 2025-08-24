@@ -4,6 +4,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 import gradio as gr
 from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.types import Command
 from agent.graph import graph
 from agent.knowledge_base import knowledge_base
 import json
@@ -27,7 +28,8 @@ class ChatResearchAgent:
         self.sessions[session_id] = {
             "messages": [],
             "conversation_state": None,
-            "is_waiting_for_clarification": False,
+            "is_waiting_for_clarification":     True,
+            "is_waiting_for_save_permission": True,
             "last_result": None,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -66,16 +68,34 @@ class ChatResearchAgent:
                 state["messages"].append(HumanMessage(content=message))
             
             # 执行图
-            result = await graph.ainvoke(state)
-            
+            config = {"configurable": {"thread_id": session_id}}
+
+            if not session["is_waiting_for_save_permission"]:
+                ai_response = await graph.ainvoke(Command(resume={"save_permission": message}), config=config)
+                session["is_waiting_for_save_permission"] = True
+                result = ai_response
+            else:
+                result = await graph.ainvoke(state, config=config)
+                        # 提取AI回复
+            ai_response = ""
+            if result.get("messages"):
+                ai_response = result["messages"][-1].content
+                history[-1][1] = ai_response
+            if result.get("__interrupt__") is not None:
+                # 处理用户决策
+                if session["is_waiting_for_save_permission"]:
+                    interrupt_obj = result["__interrupt__"][0]
+                    ai_response = interrupt_obj.value['question']
+                    history.append([None, None])
+                    history[-1][1] = ai_response
+                    session["is_waiting_for_save_permission"] = False
+                    return "", history
+
             # 保存会话状态
             session["conversation_state"] = result
             session["last_result"] = result
             
-            # 提取AI回复
-            ai_response = ""
-            if result.get("messages"):
-                ai_response = result["messages"][-1].content
+
             
             # 检查是否需要澄清
             need_clarification = result.get("need_clarification", False)
@@ -98,6 +118,8 @@ class ChatResearchAgent:
                 {"role": "user", "content": message, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")},
                 {"role": "assistant", "content": ai_response, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}
             ])
+
+
             
             return "", history
             

@@ -12,7 +12,7 @@ from typing_extensions import Literal
 from langgraph.prebuilt import create_react_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Command
+from langgraph.types import Command,interrupt
 from agent.state import (
     OverallState,
     QueryGenerationState,
@@ -161,7 +161,7 @@ def local_rag_search(state: OverallState, config: RunnableConfig) -> RAGState:
     retrieve_tool = create_rag_tool()
     
     # 创建 React Agent
-    agent_executor = create_react_agent(llm, [retrieve_tool], checkpointer=memory)
+    agent_executor = create_react_agent(llm, [retrieve_tool])
     
     try:
         # 执行 RAG 检索
@@ -616,6 +616,19 @@ async def save_file_node(state: OverallState, config: RunnableConfig) -> Overall
 
 
 
+def ask_save_permission(state: OverallState) -> Command[Literal["save_file", "__end__"]]:
+    """处理用户的保存决定"""
+    state["awaiting_user_decision"] = True
+    save_permission = interrupt({
+        "question": "是否保存文件?"
+    })
+    state["awaiting_user_decision"] = False
+    if save_permission["save_permission"] == "save":
+        return Command(goto="save_file", update={"save_permission": "save"})
+    else:
+        return Command(goto="__end__", update={"save_permission": "skip"})              
+
+
 # Create our Agent Graph
 builder = StateGraph(OverallState, config_schema=Configuration)
 
@@ -627,6 +640,7 @@ builder.add_node("generate_query", generate_query)
 builder.add_node("web_research", web_research)
 builder.add_node("reflection", reflection)
 builder.add_node("finalize_answer", finalize_answer)
+builder.add_node("ask_save_permission", ask_save_permission)
 builder.add_node("save_file", save_file_node)
 builder.add_node("finalize_answer_with_rag", finalize_answer_with_rag)
 
@@ -656,11 +670,12 @@ builder.add_conditional_edges(
 )
 
 # 7. 结束节点
-builder.add_edge("finalize_answer", "save_file")
+builder.add_edge("finalize_answer", "ask_save_permission")
+
 builder.add_edge("save_file", END)
 builder.add_edge("finalize_answer_with_rag", END)
 
-graph = builder.compile(name="intent-clarification-rag-enhanced-search-agent")
+graph = builder.compile(name="intent-clarification-rag-enhanced-search-agent",checkpointer=memory)
 
 # 保存图形结构
 try:
